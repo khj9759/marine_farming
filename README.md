@@ -14,6 +14,7 @@ This visual map displays the regions where conditions are suitable for oyster an
 ### Data
 The data for this project was obtained from the provided link, and it will be included in the .gitignore.
 
+```
 marine_farming
 │   README.md
 │   Rmd/Proj files    
@@ -25,4 +26,5 @@ marine_farming
     │   average_annual_sst_2009.tif        
     │   average_annual_sst_2010.tif        
     │   average_annual_sst_2011.tif
-    │   average_annual_sst_2012.tif     
+    │   average_annual_sst_2012.tif
+```  

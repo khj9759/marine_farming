@@ -1,0 +1,384 @@
+---
+title: 'Mapping the global potential for marine aquaculture'
+description: "Mapping global marine aquaculture potential, particularly on the West Coast of the US, focusing on optimal oyster cultivation in Exclusive Economic Zones."
+author:
+  name: Haejin Kim
+  url: https://khj9759.github.io/
+  orcid: 0000-0002-5300-3075
+  affiliation: EDS223 - Geospatial
+  affiliation-url: https://ucsb-meds.github.io/
+date: 2023-12-14
+categories: [Marine, R, MEDS] # self-defined categories
+citation:
+  url: https://khj9759.github.io/posts/2023-12-14-marine/
+image: marine.jpg
+draft: False # setting this to `true` will prevent your post from appearing on your listing page until you're ready! 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+getwd()
+```
+
+## Background
+
+Marine farming could be an important source of sustainable protein worldwide, better than land-based meat production. ([Gentry et al).](https://www.nature.com/articles/s41559-017-0257-9) globally mapped potential marine farming areas, considering factors like ship traffic and oxygen levels.
+
+Find the best Exclusive Economic Zones (EEZ) on the West Coast of the US for cultivating various oyster species. Previous research indicates that oysters thrive under specific conditions:
+
+-   sea surface temperature: 11-30°C
+-   depth: 0-70 meters below sea level
+
+## Datasets
+
+#### Sea Surface Temperature
+
+To characterize the average sea surface temperature in the region, use the yearly average from 2008 to 2012. The data we're using is initially derived from [NOAA's 5km Daily Global Satellite Sea Surface Temperature Anomaly v3.1](https://coralreefwatch.noaa.gov/product/5km/index_5km_ssta.php).
+
+#### Bathymetry
+
+To assess the ocean's depth, we will utilize the following: [General Bathymetric Chart of the Oceans (GEBCO)](https://www.gebco.net/data_and_products/gridded_bathymetry_data/#area).
+
+#### Exclusive Economic Zones
+
+Establish maritime borders by delineating Exclusive Economic Zones along the west coast of the United States starting from [Marineregions.org](https://www.marineregions.org/eez.php).
+
+## Workflow
+
+Below is an outline of the steps you should consider taking to achieve the assignment tasks.
+
+```{r include=TRUE, message=FALSE}
+library(sf)
+library(dplyr)
+library(spData)
+library(here)
+library(raster)
+library(terra)
+library(tmap)
+library(kableExtra)
+
+rm(list = ls())
+here::i_am("marine_farming.Rmd")
+```
+
+#### Clean data
+
+To begin, load essential packages and set the path, preferably utilizing the "here" package. Proceed by reading the West Coast Exclusive Economic Zones shapefile. Next, import sea surface temperature (SST) rasters for the years 2008 to 2012, combining them into a raster stack. Additionally, read the bathymetry raster (depth.tif). Ensure that all data share a consistent coordinate reference system and reproject any datasets that deviate from the specified projection.
+
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+# load necessary package 
+
+# set the path 
+list.files(here("data"), pattern = "average *.tif", full.names = TRUE)
+
+# read SST rasters
+sst_2008 <- rast(here( "data","average_annual_sst_2008.tif"))
+sst_2009 <- rast(here("data","average_annual_sst_2009.tif"))
+sst_2010 <- rast(here("data","average_annual_sst_2010.tif"))
+sst_2011 <- rast(here("data","average_annual_sst_2011.tif"))
+sst_2012 <- rast(here("data","average_annual_sst_2012.tif"))
+
+# rename the column of SST rasters
+names(sst_2008) <- c("temp_2008") 
+names(sst_2009) <- c("temp_2009") 
+names(sst_2010) <- c("temp_2010") 
+names(sst_2011) <- c("temp_2011") 
+names(sst_2012) <- c("temp_2012") 
+
+# combine SST rasters 
+all_sst <- c(sst_2008,
+             sst_2009,
+             sst_2010,
+             sst_2011,
+             sst_2012)
+
+# read West Coast EEZ 
+wc <- st_read(here("data", "wc_regions_clean.shp"))
+
+# read in bathymetry
+depth <- rast("data/depth.tif")
+
+# check the crs
+#st_crs(all_sst)  # 9122 
+#st_crs(depth) # 4326 
+#st_crs(wc) # 4326
+
+# reproject using the terra way
+all_sst_reproj <- project(all_sst, wc)
+
+# check the crs
+st_crs(all_sst_reproj) == st_crs(depth) # true
+```
+
+#### Process data
+
+To proceed, we must process the Sea Surface Temperature (SST) and depth data for eventual combination. The SST and depth data possess slight variations in resolution, extents, and positions. Since we aim to maintain the integrity of the underlying depth data, we'll employ the nearest neighbor approach to resample it and align it with the SST data.
+
+Compute the average Sea Surface Temperature (SST) for the period 2008-2012. Convert the SST values from Kelvin to Celsius by subtracting 273.15. Adjust the extent of the depth raster to match that of the SST raster. Acknowledge the differing resolutions between the SST and depth data. Resample the depth data using the nearest neighbor approach to align with the resolution of the SST data. Confirm alignment in resolution, extent, and coordinate reference system between the depth and SST datasets. Evaluate the possibility of stacking the rasters for compatibility verification.
+
+```{r include=TRUE}
+
+# compute mean SST 
+mean_sst <- mean(all_sst_reproj)
+
+# convert sst from K to C
+mean_sst_c <- mean_sst - 273.15
+
+# crop depth rast to match the extent of the SST rast
+depth_cropped <- crop(depth, terra::ext(mean_sst_c)) 
+
+# using nearest neighbor approach to resample
+depth_resampled <- resample(depth_cropped,
+                mean_sst_c,
+                method = "near")
+
+# stack to check if they have the same resolution
+resolution_test <- c(depth_resampled,
+                       all_sst_reproj) # no error message means same resolution 
+```
+
+#### Find suitable locations
+
+To find suitable locations for marine aquaculture, reclassify SST and depth data based on oyster suitability. Set values to 1 for suitable locations and NA for unsuitable ones. Identify areas satisfying both SST and depth conditions using the lapp() function to overlay and multiply cell values.
+
+```{r include=TRUE}
+
+# set suitable values 
+rcl_sst <- matrix(c(-Inf, 11, NA, 
+                     11, 30, 1, 
+                    30, Inf, NA), 
+              ncol = 3, byrow = TRUE) #anything outside of range is NA
+
+rcl_depth <- matrix(c(-Inf, -70, NA,
+                      -70, 0, 1,
+                       0, Inf, NA),
+                    ncol = 3, byrow = TRUE)
+
+# reclassifying raster using a reclassification matrix
+suitable_sst  <- classify(mean_sst_c,
+                     rcl = rcl_sst, 
+                     include.lowest = TRUE)
+
+suitable_depth <- classify(depth_resampled,
+                     rcl = rcl_depth,
+                     include.lowest = TRUE)
+
+# define function
+mult_fun <- function(x, y) {
+  return(x*y)}
+
+# find locations that satisfy both conditions
+overlay_suitable <- lapp(c(suitable_sst, suitable_depth), mult_fun)
+
+plot(overlay_suitable)
+```
+
+#### Find the pixel area
+
+This is a discovery determined manually using the Earth's radius.
+
+```{r}
+# figure out one pixel size and overall size 
+res(overlay_suitable) # 0.04165905, 0.04165905
+dim(overlay_suitable) # 480 x 480 
+ext(overlay_suitable) # -131.98475233, -114.987860801091, 29.9920799888132, 49.988422964 (xmin, xmax, ymin, ymax)
+
+# Assuming the CRS is in decimal degrees
+pixel_size_degrees <- 0.04165905  # Replace this with your actual pixel size in degrees
+
+# Convert degrees to kilometers (approximation)
+latitude_degrees <- mean(c(29.9920799888132, 49.988422964))  # Mean latitude of the extent
+longitude_degrees <- mean(c(-131.98475233, -114.987860801091))  # Mean longitude of the extent
+
+# Conversion factors (approximation)
+km_per_degree_latitude <- 111  # Approximation for latitude (1 degree of latitude is approximately 111 km)
+km_per_degree_longitude <- 111 * cos(latitude_degrees * pi / 180)  # Approximation for longitude
+
+# Convert pixel size from degrees to kilometers
+pixel_size_km_x <- pixel_size_degrees * km_per_degree_longitude
+pixel_size_km_y <- pixel_size_degrees * km_per_degree_latitude
+pixel_area_km <- pixel_size_km_x *pixel_size_km_y
+
+# Display the converted pixel sizes in kilometers
+print(paste("Pixel Size in Kilometers (X):", pixel_size_km_x))
+print(paste("Pixel Size in Kilometers (Y):", pixel_size_km_y))
+print(paste("Demension of Pixel Size in Kilometers (X*Y):", pixel_area_km)) # 16.382517
+```
+
+#### Determine the most suitable EEZ
+
+We aim to assess the overall suitable area within each Exclusive Economic Zone (EEZ) to prioritize zones. To achieve this, identify suitable cells within West Coast EEZs, calculate the area of grid cells, and determine the total suitable area within each EEZ.
+
+Find the percentage of suitability for each zone, considering rasterizing EEZ data and potentially joining the suitable area by region onto the EEZ vector data.
+
+```{r include=TRUE}
+
+# making area to grid cells and mask it 
+wc_rast <- rasterize(wc, overlay_suitable, 
+                           field = "rgn", na.rm = TRUE)
+
+wc_mask <- mask(wc_rast,overlay_suitable)
+
+# find area of each suitable zones with zonal() in each of 5 regions of EEZ
+## no need to use zonal 
+wc_zonal <- zonal(overlay_suitable, wc_mask, na.rm = TRUE, fun = "sum")
+colnames(wc_zonal)[colnames(wc_zonal) == "lyr1"] <- "count_pixel"
+
+## find the other way 
+cellSize <- cellSize(wc_rast, unit = "km") ## 13.84904, 18.55984 
+area <- zonal(cellSize, overlay_suitable) ## 16.72505 km^2 ## same as pixel_area_km
+
+wc_zonal_summary <- wc_zonal %>% 
+  group_by(rgn) %>% 
+  mutate(suitable_area = count_pixel*pixel_area_km)  # pixel size converts to km^2
+
+
+#join data
+wc_suitable_EEZ <- full_join(wc, wc_zonal_summary , by = "rgn") %>% 
+  mutate(count_pixel, 
+         percentage_suitable = (suitable_area/area_km2 * 100),
+         .before = geometry)
+
+wc_suitable_EEZ %>% kable() %>% kable_minimal()
+```
+
+#### Visualize results
+
+This visual map displays the regions where conditions are suitable for oyster cultivation. The majority of oysters thrive notably well in the southern and central regions of California. Explore these geographical patterns to gain a comprehensive understanding of oyster distribution.
+
+```{r include=TRUE}
+#set to interactive mode
+tmap_mode("view")
+
+#map for total suitable area for oysters by region
+oysters <- tm_basemap("Stamen.Terrain") +
+  tm_shape(wc_suitable_EEZ) +
+  tm_polygons(col = 'suitable_area',
+              palette = 'RdYlBu',
+              alpha = 0.75,
+              border.col = 'black',
+              title = "Total Suitable Area") +
+  tm_text("rgn", size = 0.54) +
+  tm_scale_bar(position = c("left", "right"))
+ 
+oysters
+```
+
+This illustrates the percentage of the suitable area for oyster within each region. Conversely, Washington State exhibits a significant concentration of oyster habitats.
+
+```{r include=TRUE}
+#set to interactive mode
+tmap_mode("view")
+
+#map for total suitable area for oysters by region
+oysters_percent <- tm_basemap("Stamen.Terrain") +
+  tm_shape(wc_suitable_EEZ) +
+  tm_polygons(col = 'percentage_suitable',
+              palette = 'RdYlBu',
+              alpha = 0.75,
+              border.col = 'black',
+              title = "Total Percent of Suitable Area") +
+  tm_text("rgn", size = 0.54) +
+  tm_scale_bar(position = c("left", "right"))
+ 
+oysters_percent
+```
+
+#### Red Abalone
+
+To optimize workflow efficiency, concentrate on red abalone, a species that flourishes within the depth range of 0 to 24 meters and temperature spans of 8°C to 18°C. Notably, the majority of red abalone habitats are found in Washington, indicating a preference for colder waters and northern regions. Consider exploring these specific environmental preferences to gain deeper insights into the ecological distribution of red abalone.
+
+```{r include=TRUE}
+test <- function(sst_low, sst_high, depth_low, depth_high, species){
+
+# Classify SST data: Set suitable values to 1 and unsuitable values to NA
+rcl_sst<- matrix(c(-Inf, sst_low, NA, 
+                     sst_low, sst_high, 1, 
+                    sst_high, Inf, NA), 
+              ncol = 3, byrow = TRUE) #anything outside of range is NA
+
+rcl_depth <- matrix(c(-Inf, depth_low, NA,
+                      depth_low, depth_high , 1,
+                       depth_high , Inf, NA),
+                    ncol = 3, byrow = TRUE)
+
+#reclassifying raster using a reclassification matrix
+suitable_sst <- classify(mean_sst_c,
+                     rcl = rcl_sst, 
+                     include.lowest = TRUE)
+
+suitable_depth <- classify(depth_resampled,
+                     rcl = rcl_depth,
+                     include.lowest = TRUE)
+
+#define function
+mult_fun <- function(x, y) {
+  return(x*y)}
+
+#find locations that satisfy both conditions
+overlay_suitable <- lapp(c(suitable_sst, suitable_depth), mult_fun)
+
+# making area to grid cells and mask it 
+wc_rast <- rasterize(wc, overlay_suitable, 
+                           field = "rgn", na.rm = TRUE)
+
+wc_mask <- mask(wc_rast,overlay_suitable)
+
+# grid cell, extracted by wc 
+extract <- terra::extract(wc_mask, wc)
+
+# bring the pixel size 
+pixel_area_km <- 16.38252
+
+# count pixel and add up the area
+extract_summary <- extract %>% 
+  group_by(rgn) %>% 
+  summarise(suitable_area= n()*pixel_area_km) %>% 
+  filter(!is.na(rgn)) 
+
+# join the two dataframe 
+wc_suitable_EEZ <- full_join(wc, extract_summary, by = "rgn") %>% 
+  mutate(percentage_suitable = (suitable_area/area_km2 * 100),
+         .before = geometry) 
+
+tmap_mode("view")
+
+#map for total suitable area by region
+
+area_map <- tm_basemap("Stamen.Terrain") +
+  tm_shape(wc_suitable_EEZ) +
+  tm_polygons(col = 'suitable_area',
+              palette = 'Blues',
+              alpha = 0.75,
+              style = "jenks",
+              border.col = 'black',
+              title = paste0("Total " , species, " Suitable Area")) +
+  tm_text("rgn", size = 0.54) +
+  tm_scale_bar(position = c("left", "right"))
+
+percent_area_map <- tm_basemap("Stamen.Terrain") +
+  tm_shape(wc_suitable_EEZ) +
+  tm_polygons(col = 'percentage_suitable',
+              palette = 'Oranges',
+              alpha = 0.75,
+              style = "jenks",
+              border.col = 'black',
+              title = paste0("Total ",species ," percent Suitable Area")) +
+  tm_text("rgn", size = 0.54) +
+  tm_scale_bar(position = c("left", "right"))
+
+tmap_arrange(area_map, percent_area_map)
+
+}
+
+abalone_habitats <- test(8, 18, 0, 24, "red abalone")
+abalone_habitats
+```
+
+### Conclusion
+
+This study focuses on the analysis of marine organisms beneath the ocean surface. The temperature and depth of the sea significantly impact marine life. The dataset used in this analysis provides valuable information for understanding the sea environment. While our assessments of the suitability of aquaculture are based on the present ocean conditions, it's essential to acknowledge that the environment is currently experiencing unprecedented changes. Future efforts to evaluate how climate risks may affect aquaculture potential, considering expected shifts in regional ocean temperatures and productivity, will need to improve long-term predictions and offer more nuanced insights into how climate change will impact individual species.([Gentry et al).](https://www.nature.com/articles/s41559-017-0257-9)
+
+### Reference
+
+1.  Rebecca. R, Mapping the global potential for marine aquaculture, [*Nature Ecology & Evolution*](https://www.nature.com/natecolevol) **volume1**, pages1317--1324 (2017)

@@ -12,7 +12,7 @@ This visual map displays the regions where conditions are suitable for oyster an
 - Conducting map algebra
 
 ### Data
-The data for this project was obtained from the provided link, and it will be included in the .gitignore.
+The data for this project was obtained from the provided [link](https://drive.google.com/u/0/uc?id=1u-iwnPDbe6ZK7wSFVMI-PpCKaRQ3RVmg&export=download), and it will be included in the `.gitignore`.
 
 ```
 marine_farming
@@ -26,5 +26,5 @@ marine_farming
     │   average_annual_sst_2009.tif        
     │   average_annual_sst_2010.tif        
     │   average_annual_sst_2011.tif
-    │   average_annual_sst_2012.tif
-```  
+    │   average_annual_sst_2012.tif     
+```

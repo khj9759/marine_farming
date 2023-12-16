@@ -8,7 +8,7 @@ author:
   affiliation: EDS223 - Geospatial
   affiliation-url: https://ucsb-meds.github.io/
 date: 2023-12-14
-categories: [Marine, R, MEDS] # self-defined categories
+categories: [Geospatial, R, MEDS] # self-defined categories
 citation:
   url: https://khj9759.github.io/posts/2023-12-14-marine/
 image: marine.jpg
@@ -20,9 +20,11 @@ knitr::opts_chunk$set(echo = TRUE)
 getwd()
 ```
 
+Repository: <https://github.com/khj9759/marine_farming>
+
 ## Background
 
-Marine farming could be an important source of sustainable protein worldwide, better than land-based meat production. ([Gentry et al).](https://www.nature.com/articles/s41559-017-0257-9) globally mapped potential marine farming areas, considering factors like ship traffic and oxygen levels.
+Marine farming could be an important source of sustainable protein worldwide, better than land-based meat production with ([Gentry et al)](https://www.nature.com/articles/s41559-017-0257-9) globally mapped potential marine farming areas, considering factors like ship traffic and oxygen levels.
 
 Find the best Exclusive Economic Zones (EEZ) on the West Coast of the US for cultivating various oyster species. Previous research indicates that oysters thrive under specific conditions:
 
@@ -43,6 +45,18 @@ To assess the ocean's depth, we will utilize the following: [General Bathymetric
 
 Establish maritime borders by delineating Exclusive Economic Zones along the west coast of the United States starting from [Marineregions.org](https://www.marineregions.org/eez.php).
 
+## Highlight
+
+-   Merging vector and raster data
+
+-   Resampling raster data
+
+-   Rasterizing and Masking raster data
+
+-   Identifying overlay areas using lapp
+
+-   Conducting map algebra
+
 ## Workflow
 
 Below is an outline of the steps you should consider taking to achieve the assignment tasks.
@@ -61,7 +75,7 @@ rm(list = ls())
 here::i_am("marine_farming.Rmd")
 ```
 
-#### Clean data
+### Clean data
 
 To begin, load essential packages and set the path, preferably utilizing the "here" package. Proceed by reading the West Coast Exclusive Economic Zones shapefile. Next, import sea surface temperature (SST) rasters for the years 2008 to 2012, combining them into a raster stack. Additionally, read the bathymetry raster (depth.tif). Ensure that all data share a consistent coordinate reference system and reproject any datasets that deviate from the specified projection.
 
@@ -110,7 +124,7 @@ all_sst_reproj <- project(all_sst, wc)
 st_crs(all_sst_reproj) == st_crs(depth) # true
 ```
 
-#### Process data
+### Process data
 
 To proceed, we must process the Sea Surface Temperature (SST) and depth data for eventual combination. The SST and depth data possess slight variations in resolution, extents, and positions. Since we aim to maintain the integrity of the underlying depth data, we'll employ the nearest neighbor approach to resample it and align it with the SST data.
 
@@ -137,7 +151,7 @@ resolution_test <- c(depth_resampled,
                        all_sst_reproj) # no error message means same resolution 
 ```
 
-#### Find suitable locations
+### Find suitable locations
 
 To find suitable locations for marine aquaculture, reclassify SST and depth data based on oyster suitability. Set values to 1 for suitable locations and NA for unsuitable ones. Identify areas satisfying both SST and depth conditions using the lapp() function to overlay and multiply cell values.
 
@@ -173,7 +187,7 @@ overlay_suitable <- lapp(c(suitable_sst, suitable_depth), mult_fun)
 plot(overlay_suitable)
 ```
 
-#### Find the pixel area
+### Find the pixel area
 
 This is a discovery determined manually using the Earth's radius.
 
@@ -205,7 +219,7 @@ print(paste("Pixel Size in Kilometers (Y):", pixel_size_km_y))
 print(paste("Demension of Pixel Size in Kilometers (X*Y):", pixel_area_km)) # 16.382517
 ```
 
-#### Determine the most suitable EEZ
+### Determine the most suitable EEZ
 
 We aim to assess the overall suitable area within each Exclusive Economic Zone (EEZ) to prioritize zones. To achieve this, identify suitable cells within West Coast EEZs, calculate the area of grid cells, and determine the total suitable area within each EEZ.
 
@@ -224,14 +238,10 @@ wc_mask <- mask(wc_rast,overlay_suitable)
 wc_zonal <- zonal(overlay_suitable, wc_mask, na.rm = TRUE, fun = "sum")
 colnames(wc_zonal)[colnames(wc_zonal) == "lyr1"] <- "count_pixel"
 
-## find the other way 
-cellSize <- cellSize(wc_rast, unit = "km") ## 13.84904, 18.55984 
-area <- zonal(cellSize, overlay_suitable) ## 16.72505 km^2 ## same as pixel_area_km
-
+## use zonal
 wc_zonal_summary <- wc_zonal %>% 
   group_by(rgn) %>% 
   mutate(suitable_area = count_pixel*pixel_area_km)  # pixel size converts to km^2
-
 
 #join data
 wc_suitable_EEZ <- full_join(wc, wc_zonal_summary , by = "rgn") %>% 
@@ -242,16 +252,17 @@ wc_suitable_EEZ <- full_join(wc, wc_zonal_summary , by = "rgn") %>%
 wc_suitable_EEZ %>% kable() %>% kable_minimal()
 ```
 
-#### Visualize results
+### Visualize results
 
 This visual map displays the regions where conditions are suitable for oyster cultivation. The majority of oysters thrive notably well in the southern and central regions of California. Explore these geographical patterns to gain a comprehensive understanding of oyster distribution.
 
 ```{r include=TRUE}
 #set to interactive mode
 tmap_mode("view")
+tmap_last()
 
 #map for total suitable area for oysters by region
-oysters <- tm_basemap("Stamen.Terrain") +
+oysters <- tm_basemap("OpenStreetMap.Mapnik") +
   tm_shape(wc_suitable_EEZ) +
   tm_polygons(col = 'suitable_area',
               palette = 'RdYlBu',
@@ -269,9 +280,10 @@ This illustrates the percentage of the suitable area for oyster within each regi
 ```{r include=TRUE}
 #set to interactive mode
 tmap_mode("view")
+tmap_last()
 
 #map for total suitable area for oysters by region
-oysters_percent <- tm_basemap("Stamen.Terrain") +
+oysters_percent <- tm_basemap("OpenStreetMap.Mapnik") +
   tm_shape(wc_suitable_EEZ) +
   tm_polygons(col = 'percentage_suitable',
               palette = 'RdYlBu',
@@ -284,9 +296,9 @@ oysters_percent <- tm_basemap("Stamen.Terrain") +
 oysters_percent
 ```
 
-#### Red Abalone
+## Peruvian Anchoveta
 
-To optimize workflow efficiency, concentrate on red abalone, a species that flourishes within the depth range of 0 to 24 meters and temperature spans of 8°C to 18°C. Notably, the majority of red abalone habitats are found in Washington, indicating a preference for colder waters and northern regions. Consider exploring these specific environmental preferences to gain deeper insights into the ecological distribution of red abalone.
+To enhance workflow efficiency, focus on the Peruvian Anchoveta, a species thriving within the depth range of -3 to -80 meters and temperatures spanning 13°C to 23°C. It is noteworthy that the primary habitats of Peruvian Anchoveta are located in South California, suggesting a preference for warmer waters at specific depths. Explore these precise environmental preferences to gain profound insights into the ecological distribution of Peruvian Anchoveta.
 
 ```{r include=TRUE}
 test <- function(sst_low, sst_high, depth_low, depth_high, species){
@@ -324,28 +336,30 @@ wc_rast <- rasterize(wc, overlay_suitable,
 
 wc_mask <- mask(wc_rast,overlay_suitable)
 
-# grid cell, extracted by wc 
-extract <- terra::extract(wc_mask, wc)
+# find area of each suitable zones with zonal() in each of 5 regions of EEZ
+## no need to use zonal 
+wc_zonal <- zonal(overlay_suitable, wc_mask, na.rm = TRUE, fun = "sum")
+colnames(wc_zonal)[colnames(wc_zonal) == "lyr1"] <- "count_pixel"
 
 # bring the pixel size 
 pixel_area_km <- 16.38252
 
-# count pixel and add up the area
-extract_summary <- extract %>% 
+## use zonal
+wc_zonal_summary <- wc_zonal %>% 
   group_by(rgn) %>% 
-  summarise(suitable_area= n()*pixel_area_km) %>% 
-  filter(!is.na(rgn)) 
+  mutate(suitable_area = count_pixel*pixel_area_km)
 
 # join the two dataframe 
-wc_suitable_EEZ <- full_join(wc, extract_summary, by = "rgn") %>% 
+wc_suitable_EEZ <- full_join(wc, wc_zonal_summary, by = "rgn") %>% 
   mutate(percentage_suitable = (suitable_area/area_km2 * 100),
          .before = geometry) 
 
 tmap_mode("view")
+tmap_last()
 
 #map for total suitable area by region
 
-area_map <- tm_basemap("Stamen.Terrain") +
+area_map <- tm_basemap("OpenStreetMap.Mapnik") +
   tm_shape(wc_suitable_EEZ) +
   tm_polygons(col = 'suitable_area',
               palette = 'Blues',
@@ -356,7 +370,7 @@ area_map <- tm_basemap("Stamen.Terrain") +
   tm_text("rgn", size = 0.54) +
   tm_scale_bar(position = c("left", "right"))
 
-percent_area_map <- tm_basemap("Stamen.Terrain") +
+percent_area_map <- tm_basemap("OpenStreetMap.Mapnik") +
   tm_shape(wc_suitable_EEZ) +
   tm_polygons(col = 'percentage_suitable',
               palette = 'Oranges',
@@ -371,14 +385,13 @@ tmap_arrange(area_map, percent_area_map)
 
 }
 
-abalone_habitats <- test(8, 18, 0, 24, "red abalone")
-abalone_habitats
+test(13, 23, -80, -3, "Peruvian Anchoveta")
 ```
 
-### Conclusion
+## Conclusion
 
-This study focuses on the analysis of marine organisms beneath the ocean surface. The temperature and depth of the sea significantly impact marine life. The dataset used in this analysis provides valuable information for understanding the sea environment. While our assessments of the suitability of aquaculture are based on the present ocean conditions, it's essential to acknowledge that the environment is currently experiencing unprecedented changes. Future efforts to evaluate how climate risks may affect aquaculture potential, considering expected shifts in regional ocean temperatures and productivity, will need to improve long-term predictions and offer more nuanced insights into how climate change will impact individual species.([Gentry et al).](https://www.nature.com/articles/s41559-017-0257-9)
+This study focuses on the analysis of marine organisms beneath the ocean surface. The temperature and depth of the sea significantly impact marine life. The dataset used in this analysis provides valuable information for understanding the sea environment. While our assessments of the suitability of aquaculture are based on the present ocean conditions, it's essential to acknowledge that the environment is currently experiencing unprecedented changes. Future efforts to evaluate how climate risks may affect aquaculture potential, considering expected shifts in regional ocean temperatures and productivity, will need to improve long-term predictions and offer more nuanced insights into how climate change will impact individual species.([Gentry et al)](https://www.nature.com/articles/s41559-017-0257-9)
 
-### Reference
+## Reference
 
 1.  Rebecca. R, Mapping the global potential for marine aquaculture, [*Nature Ecology & Evolution*](https://www.nature.com/natecolevol) **volume1**, pages1317--1324 (2017)
